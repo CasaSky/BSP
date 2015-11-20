@@ -10,6 +10,7 @@
 void *status;
 char alphabet[ALPHASIZE] = "abcdefghijklmnopqrstuvwxyz";
 char *p_alpha = alphabet;
+int active=1;
 int i;
 int rc1, rc2, rc3, rc4;
 pthread_t threads[4];
@@ -46,20 +47,25 @@ int main(int argc, char* argv[])
     p_rb -> count = 0;
     printf("Counter value %d\n", p_rb ->count);
 
-    //user_attr -> param -> sched_priority = FIFO;
-    //struct sched_param param;
-    //char *main_sched_str;
-    //main_sched_str = optarg;
-    //param ->sched_priority = strtol(&main_sched_str[1], NULL, 0);
-    //pthread_t user_attr;
-    //pthread_attr_setschedparam(user_attr,1 , SCHED_FIFO);
+    pthread_attr_t my_thread_attr; // Thread Attribut
+    struct sched_param my_prio;
+    pthread_attr_init(&my_thread_attr);
+    pthread_attr_setinheritsched(&my_thread_attr, PTHREAD_EXPLICIT_SCHED); // Freigabe der Parameteränd.
+    pthread_attr_setschedpolicy(&my_thread_attr, SCHED_FIFO);
+    my_prio.sched_priority = 10; // Priority ändern
+    pthread_attr_setschedparam(&my_thread_attr, &my_prio);
+
+    rc3 = pthread_create(&threads[2], NULL, control, (void *)&thread_id[2]);
     rc1 = pthread_create(&threads[0], NULL, p_1_w, (void *)thread_id);
     rc2 = pthread_create(&threads[1], NULL, p_2_w, (void *)&thread_id[1]);
-    rc3 = pthread_create(&threads[2], NULL, control, (void *)&thread_id[2]);
     rc4 = pthread_create(&threads[3], NULL, consumer, (void *)&thread_id[3]);
     for(i = 0; i<4; i++)
         pthread_join(threads[i], NULL);
     printf("Ende nach Join der Threads\n");
+    printf("Control Thread returns: %d\n",rc3);
+    printf("Producer_1 Thread returns: %d\n",rc1);
+    printf("Producer_2 Thread returns: %d\n",rc2);
+    printf("Consumer Thread returns: %d\n",rc4);
     return 0;
 }
 
@@ -75,6 +81,7 @@ void menu()
 
 void* control(void *pid)
 {
+    while (1) {
     char eingabe;
     int rc;
     menu();
@@ -83,13 +90,36 @@ void* control(void *pid)
     switch(eingabe) {
         case '1':
         printf("producer_1 gejoint!\n");
-        pthread_join(thread_id[0], &status);
+        if (active) {
+            pthread_detach(thread_id[0]);
+            active=0;
+        }
+        else {
+            pthread_join(thread_id[0], &status);
+            active=1;
+        }
         break;
         case '2':
+        if (active) {
+            pthread_detach(thread_id[1]);
+            active=0;
+        }
+        else {
+            pthread_join(thread_id[1], &status);
+            active=1;
+        }
         printf("producer_2 gejoint!\n");
         pthread_join(thread_id[1], &status);
         break;
-        case 'c': case 'C': pthread_join(thread_id[3], &status); break;
+        case 'c': case 'C':
+        if (active) {
+            pthread_detach(thread_id[3]);
+            active=0;
+        }
+        else {
+            pthread_join(thread_id[3], &status);
+            active=1;
+        }
         case 'q': case 'Q':
         pthread_cancel(threads[0]);
         pthread_cancel(threads[1]);
@@ -100,6 +130,7 @@ void* control(void *pid)
         default:
         printf("Kein Eingabe wurde festgestellt!");
         break;
+    }
     }
 }
 
@@ -131,7 +162,8 @@ void* p_1_w(void *pid)
                 p_alpha++;
             pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
         }
-        else sleep(3);
+        else pthread_cond_signal(&not_empty_condvar);
+        //pthread_cond_wait(&not_empty_condvar, &rb_mutex);
     }
 }
 
@@ -161,7 +193,8 @@ void* p_2_w(void *pid)
                 p_alpha++;
             pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
         }
-        else sleep(3);
+        else pthread_cond_signal(&not_empty_condvar);
+        //pthread_cond_wait(&not_empty_condvar, &rb_mutex);
     }
 }
 void* consumer(void *pid)
@@ -182,6 +215,7 @@ void* consumer(void *pid)
                 p_rb ->p_out++;
             p_rb -> count--;
         }
-        else sleep(2);
+        else pthread_cond_signal(&not_empty_condvar);
+        //pthread_cond_wait(&not_empty_condvar, &rb_mutex);
     }
 }
