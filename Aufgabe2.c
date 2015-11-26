@@ -8,10 +8,10 @@
 #define ALPHASIZE 26
 #define DEFAULT 0
 #define CONTROLEXIT
-//const int p1terminated = 10;
-//const int p2terminated = 20;
-//const int cterminated = 30;
-//void *status; /* thread result */
+const int p1terminated = 10;
+const int p2terminated = 20;
+const int cterminated = 30;
+void *status; /* thread result */
 int result[4];
 int controllexit=0;
 void* status;
@@ -24,13 +24,13 @@ int p2flag=1;
 int cflag=1;
 int zaehler=0;
 int i;
-int rc1, rc2, rc3, rc4;
 pthread_t threads[4];
 #define p_alpha_start (char *)alphabet
 #define p_alpha_end (char *)(alphabet + ALPHASIZE-1)
 #define p_alpha_start2 (char *)alphabet2
 #define p_alpha_end2 (char *)(alphabet2 + ALPHASIZE-1)
 char zeichen;
+
 pthread_mutex_t rb_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t full_condvar = PTHREAD_COND_INITIALIZER;
 pthread_cond_t empty_condvar = PTHREAD_COND_INITIALIZER;
@@ -39,6 +39,7 @@ pthread_cond_t not_full_condvar = PTHREAD_COND_INITIALIZER;
 pthread_cond_t p1_unlock = PTHREAD_COND_INITIALIZER;
 pthread_cond_t p2_unlock = PTHREAD_COND_INITIALIZER;
 pthread_cond_t c_unlock = PTHREAD_COND_INITIALIZER;
+
 int thread_id[4] = {0,1,2,3};
 typedef struct {
 int buffer[MAX];
@@ -74,32 +75,33 @@ int main(int argc, char* argv[])
     my_prio.sched_priority = 10; // Priority ändern
     pthread_attr_setschedparam(&my_thread_attr, &my_prio);
 
-    rc3 = pthread_create(&threads[2], NULL, control, (void *)&thread_id[2]);
-    rc1 = pthread_create(&threads[0], NULL, p_1_w, (void *)thread_id);
-    rc2 = pthread_create(&threads[1], NULL, p_2_w, (void *)&thread_id[1]);
-    rc4 = pthread_create(&threads[3], NULL, consumer, (void *)&thread_id[3]);
+    // Threads erstellen
+    pthread_create(&threads[2], NULL, control, (void *)&thread_id[2]);
+    pthread_create(&threads[0], NULL, p_1_w, (void *)thread_id);
+    pthread_create(&threads[1], NULL, p_2_w, (void *)&thread_id[1]);
+    pthread_create(&threads[3], NULL, consumer, (void *)&thread_id[3]);
 
+        // Controller join und status abfangen
         pthread_join(threads[2], &status);
+        // Wenn erfolgreich beendet
         if (status == 0) {
             printf("Control join erfolgreich!\n");
-            pthread_cond_signal(&p1_unlock);
-            pthread_cond_signal(&p2_unlock);
-            pthread_cond_signal(&c_unlock);
-            pthread_cancel(threads[0]);
-            pthread_cancel(threads[1]);
-            pthread_cancel(threads[3]);
+            pthread_cond_signal(&p1_unlock); // signal für das Freigeben, wenn p1 gestoppt ist.
+            pthread_cond_signal(&p2_unlock); // signal für das Freigeben, wenn p2 gestoppt ist.
+            pthread_cond_signal(&c_unlock); // signal für das Freigeben, wenn c gestoppt ist.
+            pthread_cancel(threads[0]); // beenden
+            pthread_cancel(threads[1]); // beenden
+            pthread_cancel(threads[3]); // beenden
         }
-		// controll join
-		// Rückgabewert vom Controller abfangen -> Falls "ok", Cancels aufrufen
-		// Signale schicken mit jeweiligen Conditionvariablen
-		// Siehe Kapitel 4 Folie 44 cancelTest() vor dem mutexlock aufrufen.
 
     //for(i = 0; i<4; i++) {
-        result[0] = pthread_join(threads[0], NULL);
-        result[1] = pthread_join(threads[1], NULL);
-        result[3] = pthread_join(threads[3], NULL);
+        result[0] = pthread_join(threads[0], NULL); // &status
+        result[1] = pthread_join(threads[1], NULL); // &status
+        result[3] = pthread_join(threads[3], NULL); // &status
+    //printf("Exit status: %d\n", *(int *)status); // Speicherzugriffsfehler
         //result[i] = *(int *)status;
     //}
+
 	// vosichthalber vor dem Join ein Signal für den jeweiligen Thread mit condtion schicken.
     printf("Ende nach Join der Threads\n");
     //printf("Control Thread returns: %d\n",result[2]);
@@ -119,44 +121,47 @@ void menu()
     printf("TE h: Menu\n");
 }
 
-void* control(void *pid)
+// Wenn Flag gesetzt ist, heißt es, der Thread läuft, wenn nicht, ist er gestoppt
+//läuft solange bis q oder Q gedrückt wird -> return 0
+void *control(void *pid)
 {
     while (1) {
     char eingabe;
-    int rc;
     //menu();
     eingabe = getchar();
 
     switch(eingabe) {
         case '1':
-        pthread_mutex_lock(&rb_mutex);
-        if (p1flag==1)  // stoppen
+        pthread_mutex_lock(&rb_mutex); // Ressourcen Reservieren
+        if (p1flag==1)  // Falls flag gesetzt ist -> stoppen
             p1flag=0;
         else {// starten
             p1flag=1;
-            pthread_cond_signal(&p1_unlock);
+            pthread_cond_signal(&p1_unlock); // Signal für p1_unlock, da es gestartet werden soll
         }
-        pthread_mutex_unlock(&rb_mutex);
+        pthread_mutex_unlock(&rb_mutex); // Ressourcen Freigeben
         break;
+
         case '2':
-        pthread_mutex_lock(&rb_mutex);
-        if (p2flag==1)  // stoppen
+        pthread_mutex_lock(&rb_mutex); // Ressourcen Reservieren
+        if (p2flag==1)  // Falls flag gesetzt ist -> stoppen
             p2flag=0;
         else {// starten
             p2flag=1;
-            pthread_cond_signal(&p2_unlock);
+            pthread_cond_signal(&p2_unlock); // Signal für p1_unlock, da es gestartet werden soll
         }
-        pthread_mutex_unlock(&rb_mutex);
+        pthread_mutex_unlock(&rb_mutex); // Ressourcen Freigeben
         break;
+
         case 'c': case 'C':
-        pthread_mutex_lock(&rb_mutex);
-        if (cflag==1)  // stoppen
+        pthread_mutex_lock(&rb_mutex); // Ressourcen Reservieren
+        if (cflag==1)   // Falls flag gesetzt ist -> stoppen
             cflag=0;
         else {// starten
             cflag=1;
-            pthread_cond_signal(&c_unlock);
+            pthread_cond_signal(&c_unlock); // Signal für p1_unlock, da es gestartet werden soll
         }
-        pthread_mutex_unlock(&rb_mutex);
+        pthread_mutex_unlock(&rb_mutex); // Ressourcen Freigeben
         break;
         case 'q': case 'Q':
         return  (void *)0;
@@ -175,99 +180,103 @@ void* p_1_w(void *pid)
 {
     while (1)
     {
-        if(p_rb->count < MAX){
-            sleep(3);
-            pthread_testcancel();
-            pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
-            if (p1flag==0) {
-                printf("p1 waiting...");
-                pthread_cond_wait(&p1_unlock, &rb_mutex);
-            }
-            zeichen = (*p_alpha);
-            *p_rb ->p_in = zeichen;
-            if (p_rb -> p_in == p_end)
+        if (p1flag==0) { // Wenn flag nicht gesetzt ist, heißt der Thread soll stoppen -> wait for signal
+                printf("p1 waiting...\n");
+                pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+                pthread_cond_wait(&p1_unlock, &rb_mutex); // warten auf Signal mit p1_unlock -> wieder starten von p1
+                pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+        }
+        pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+        if(p_rb->count < MAX){ // Wenn counter >= MAX ->  Ringpuffer ist voll -> es kann nichts mehr geschrieben werden, bis platz frei ist
+            pthread_testcancel(); // sicheres Cancel
+            zeichen = (*p_alpha); // nächstes Zeichen holen
+            *p_rb ->p_in = zeichen; // Zeichen im nächsten verfübaren Platz im Puffer, schreiben
+            if (p_rb -> p_in == p_end) // Wenn das Ende erreicht ist -> vom Anfang an starten
                 p_rb -> p_in = p_start;
             else
-                p_rb ->p_in++;
+                p_rb ->p_in++; // Zeigt auf das nächste verfügbaren Platz im Ringpuffer
 
-printf("Geschrieben %c \n", zeichen);
-            p_rb -> count++;
-            if (p_alpha == p_alpha_end)
+            printf("Geschrieben %c \n", zeichen);
+            p_rb -> count++; // Count um eins erhören
+            if (p_alpha == p_alpha_end) // Fall das Alphabet durch ist -> vorne wieder anfangen
                 p_alpha = p_alpha_start;
             else
-                p_alpha++;
-            pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+                p_alpha++; // zeigt auf das nächste Zeichen im Alphabet
+            //pthread_cond_signal(&not_empty_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
         }
-        else pthread_cond_signal(&full_condvar);
-        pthread_mutex_unlock(&rb_mutex);
-        //pthread_cond_wait(&not_empty_condvar, &rb_mutex);
+        pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+        sleep(3); // um ein anderen Thread ran zu lassen
+       // else pthread_cond_wait(&not_full_condvar, &rb_mutex);
     }
-    //return((void *) &p1terminated);
+    return((void *) &p1terminated);
 }
 
 void* p_2_w(void *pid)
 {
     while (1)
     {
-        if(p_rb->count < MAX){
-            sleep(3);
-            pthread_testcancel();
-            pthread_mutex_lock(&rb_mutex); // Reservierung der Ressourcen für den aktuellen Thread
-            if (p2flag==0) {
-                printf("p2 waiting...");
-                pthread_cond_wait(&p2_unlock, &rb_mutex);
-            }
-            zeichen = (*p_alpha2);//(toupper(*p_alpha));
-            *p_rb ->p_in = zeichen;
-            if (p_rb -> p_in == p_end)
+        if (p2flag==0) { // Wenn flag nicht gesetzt ist, heißt der Thread soll stoppen -> wait for signal
+                printf("p2 waiting...\n");
+                pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+                pthread_cond_wait(&p2_unlock, &rb_mutex);  // warten auf Signal mit p1_unlock -> wieder starten von p2
+                pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+        }
+        pthread_mutex_lock(&rb_mutex); // Reservierung der Ressourcen für den aktuellen Thread
+        if(p_rb->count < MAX){  // Wenn counter >= MAX ->  Ringpuffer ist voll -> es kann nichts mehr geschrieben werden, bis platz frei ist
+            pthread_testcancel(); // sicheres Cancel
+            zeichen = (*p_alpha2); // nächstes Zeichen holen
+            *p_rb ->p_in = zeichen; // Zeichen im nächsten verfübaren Platz im Puffer, schreiben
+            if (p_rb -> p_in == p_end) // Wenn das Ende erreicht ist -> vom Anfang an starten
                 p_rb -> p_in = p_start;
             else
-                p_rb ->p_in++;
+                p_rb ->p_in++; // Zeigt auf das nächste verfügbaren Platz im Ringpuffer, was ein neues Zeichen darauf geschrieben kann
 
-printf("Geschrieben %c \n", zeichen);
-            p_rb -> count++;
-            if (p_alpha2 == p_alpha_end2)
+            printf("Geschrieben %c \n", zeichen);
+            p_rb -> count++; // Count um eins erhören
+            if (p_alpha2 == p_alpha_end2) // Fall das Alphabet durch ist -> vorne wieder anfangen
                 p_alpha2 = p_alpha_start2;
             else
-                p_alpha2++;
-            pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+                p_alpha2++; // zeigt auf das nächste Zeichen im Alphabet
+            //pthread_cond_signal(&not_empty_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
         }
-        else pthread_cond_signal(&full_condvar);
-        pthread_mutex_unlock(&rb_mutex);
-        //pthread_cond_wait(&not_empty_condvar, &rb_mutex);
+        pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+        sleep(3); // um ein anderen Thread ran zu lassen
+        //else pthread_cond_wait(&not_full_condvar, &rb_mutex);
     }
-    //return((void *) &p2terminated);
+    return((void *) &p2terminated);
 }
 void* consumer(void *pid)
 {
     while (1){
-        if(p_rb->count > 0) {
-            sleep(2);
-            pthread_testcancel();
-            pthread_mutex_lock(&rb_mutex);
-            if (cflag==0) {
-                printf("consumer waiting...");
-                pthread_cond_wait(&c_unlock, &rb_mutex);
-            }
-            zeichen = *p_rb ->p_out;
-            if (zaehler < MAXZEICHEN) {
+        if (cflag==0) { // Wenn flag nicht gesetzt ist, heißt der Thread soll stoppen -> wait for signal
+                printf("consumer waiting...\n");
+                pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+                pthread_cond_wait(&c_unlock, &rb_mutex);  // warten auf Signal mit p1_unlock -> wieder starten von consumer
+                pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+        }
+        pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+        if(p_rb->count > 0) { // Wenn counter <= 0 -> Ringpuffer ist leer -> es kann nichts mehr gelesen werden,
+            pthread_testcancel(); // sicheres Cancel
+            zeichen = *p_rb ->p_out; // nächstes Zeichen, das gelesen kann, holen
+            if (zaehler < MAXZEICHEN) {  // Max erreicht
                 printf("Gelesen %c \n", zeichen);
                 zaehler++;
             }
             else {
                 printf("Gelesen %c \n", zeichen);
-		zaehler=0;
-	    }
-            *p_rb ->p_out = DEFAULT;
-            if (p_rb -> p_out == p_end)
+                zaehler=0;
+            }
+            *p_rb ->p_out = DEFAULT; // löscht das Zeichen, was bereist gelesen wurde.
+            if (p_rb -> p_out == p_end) // Wenn das Ende erreicht ist -> vom Anfang an starten
                 p_rb -> p_out = p_start;
             else
-                p_rb ->p_out++;
+                p_rb ->p_out++; // Zeigt auf das nächste Platz im Ringpuffer, was gelesen kann
             p_rb -> count--;
+            //pthread_cond_signal(&not_full_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
         }
-        //else pthread_cond_signal(&empty_condvar);
-        pthread_mutex_unlock(&rb_mutex);
-        //pthread_cond_wait(&not_empty_condvar, &rb_mutex);
+        pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+        sleep(2); // um ein anderen Thread ran zu lassen
+        //else pthread_cond_wait(&not_empty_condvar, &rb_mutex);
     }
-    //return((void *) &cterminated);
+    return((void *) &cterminated);
 }
