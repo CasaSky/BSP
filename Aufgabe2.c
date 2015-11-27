@@ -32,8 +32,10 @@ pthread_t threads[4];
 char zeichen;
 
 pthread_mutex_t rb_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t full_condvar = PTHREAD_COND_INITIALIZER;
-pthread_cond_t empty_condvar = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t rp1_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t rp2_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t rc_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 pthread_cond_t not_empty_condvar = PTHREAD_COND_INITIALIZER;
 pthread_cond_t not_full_condvar = PTHREAD_COND_INITIALIZER;
 pthread_cond_t p1_unlock = PTHREAD_COND_INITIALIZER;
@@ -128,40 +130,40 @@ void *control(void *pid)
     while (1) {
     char eingabe;
     //menu();
-    eingabe = getchar();
+    eingabe = getchar(); // blokiert hier
 
     switch(eingabe) {
         case '1':
-        pthread_mutex_lock(&rb_mutex); // Ressourcen Reservieren
+        pthread_mutex_lock(&rp1_mutex); // Ressourcen Reservieren
         if (p1flag==1)  // Falls flag gesetzt ist -> stoppen
             p1flag=0;
         else {// starten
             p1flag=1;
             pthread_cond_signal(&p1_unlock); // Signal für p1_unlock, da es gestartet werden soll
         }
-        pthread_mutex_unlock(&rb_mutex); // Ressourcen Freigeben
+        pthread_mutex_unlock(&rp1_mutex); // Ressourcen Freigeben
         break;
 
         case '2':
-        pthread_mutex_lock(&rb_mutex); // Ressourcen Reservieren
+        pthread_mutex_lock(&rp2_mutex); // Ressourcen Reservieren
         if (p2flag==1)  // Falls flag gesetzt ist -> stoppen
             p2flag=0;
         else {// starten
             p2flag=1;
             pthread_cond_signal(&p2_unlock); // Signal für p1_unlock, da es gestartet werden soll
         }
-        pthread_mutex_unlock(&rb_mutex); // Ressourcen Freigeben
+        pthread_mutex_unlock(&rp2_mutex); // Ressourcen Freigeben
         break;
 
         case 'c': case 'C':
-        pthread_mutex_lock(&rb_mutex); // Ressourcen Reservieren
+        pthread_mutex_lock(&rc_mutex); // Ressourcen Reservieren
         if (cflag==1)   // Falls flag gesetzt ist -> stoppen
             cflag=0;
         else {// starten
             cflag=1;
             pthread_cond_signal(&c_unlock); // Signal für p1_unlock, da es gestartet werden soll
         }
-        pthread_mutex_unlock(&rb_mutex); // Ressourcen Freigeben
+        pthread_mutex_unlock(&rc_mutex); // Ressourcen Freigeben
         break;
         case 'q': case 'Q':
         return  (void *)0;
@@ -176,18 +178,23 @@ void *control(void *pid)
     }
 }
 
+
 void* p_1_w(void *pid)
 {
     while (1)
     {
         if (p1flag==0) { // Wenn flag nicht gesetzt ist, heißt der Thread soll stoppen -> wait for signal
                 printf("p1 waiting...\n");
-                pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
-                pthread_cond_wait(&p1_unlock, &rb_mutex); // warten auf Signal mit p1_unlock -> wieder starten von p1
-                pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+                pthread_mutex_lock(&rp1_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+                pthread_cond_wait(&p1_unlock, &rp1_mutex); // warten auf Signal mit p1_unlock -> wieder starten von p1
+                pthread_mutex_unlock(&rp1_mutex); // Freigabe der Ressourcen
         }
         pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
-        if(p_rb->count < MAX){ // Wenn counter >= MAX ->  Ringpuffer ist voll -> es kann nichts mehr geschrieben werden, bis platz frei ist
+        while (p_rb-> count >= MAX) { // Wenn counter >= MAX ->  Ringpuffer ist voll -> es kann nichts mehr geschrieben werden, bis platz frei ist -> wait for signal not_full
+
+            pthread_cond_wait(&not_full_condvar, &rb_mutex);
+        }
+        //Fall er aus der While-Schleife raus ist-> er hat ein signal zum Aufwachen bekommen, darf also weiter arbeiten
             pthread_testcancel(); // sicheres Cancel
             zeichen = (*p_alpha); // nächstes Zeichen holen
             *p_rb ->p_in = zeichen; // Zeichen im nächsten verfübaren Platz im Puffer, schreiben
@@ -202,11 +209,9 @@ void* p_1_w(void *pid)
                 p_alpha = p_alpha_start;
             else
                 p_alpha++; // zeigt auf das nächste Zeichen im Alphabet
-            //pthread_cond_signal(&not_empty_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
-        }
+            pthread_cond_signal(&not_empty_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
         pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
         sleep(3); // um ein anderen Thread ran zu lassen
-       // else pthread_cond_wait(&not_full_condvar, &rb_mutex);
     }
     return((void *) &p1terminated);
 }
@@ -217,12 +222,16 @@ void* p_2_w(void *pid)
     {
         if (p2flag==0) { // Wenn flag nicht gesetzt ist, heißt der Thread soll stoppen -> wait for signal
                 printf("p2 waiting...\n");
-                pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
-                pthread_cond_wait(&p2_unlock, &rb_mutex);  // warten auf Signal mit p1_unlock -> wieder starten von p2
-                pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+                pthread_mutex_lock(&rp2_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+                pthread_cond_wait(&p2_unlock, &rp2_mutex);  // warten auf Signal mit p1_unlock -> wieder starten von p2
+                pthread_mutex_unlock(&rp2_mutex); // Freigabe der Ressourcen
         }
         pthread_mutex_lock(&rb_mutex); // Reservierung der Ressourcen für den aktuellen Thread
-        if(p_rb->count < MAX){  // Wenn counter >= MAX ->  Ringpuffer ist voll -> es kann nichts mehr geschrieben werden, bis platz frei ist
+        while (p_rb-> count >= MAX) { // Wenn counter >= MAX ->  Ringpuffer ist voll -> es kann nichts mehr geschrieben werden, bis platz frei ist -> wait for signal not_full
+
+            pthread_cond_wait(&not_full_condvar, &rb_mutex);
+        }
+        //Fall er aus der While-Schleife raus ist-> er hat ein signal zum Aufwachen bekommen, darf also weiter arbeiten
             pthread_testcancel(); // sicheres Cancel
             zeichen = (*p_alpha2); // nächstes Zeichen holen
             *p_rb ->p_in = zeichen; // Zeichen im nächsten verfübaren Platz im Puffer, schreiben
@@ -237,11 +246,9 @@ void* p_2_w(void *pid)
                 p_alpha2 = p_alpha_start2;
             else
                 p_alpha2++; // zeigt auf das nächste Zeichen im Alphabet
-            //pthread_cond_signal(&not_empty_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
-        }
+            pthread_cond_signal(&not_empty_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
         pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
         sleep(3); // um ein anderen Thread ran zu lassen
-        //else pthread_cond_wait(&not_full_condvar, &rb_mutex);
     }
     return((void *) &p2terminated);
 }
@@ -250,12 +257,16 @@ void* consumer(void *pid)
     while (1){
         if (cflag==0) { // Wenn flag nicht gesetzt ist, heißt der Thread soll stoppen -> wait for signal
                 printf("consumer waiting...\n");
-                pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
-                pthread_cond_wait(&c_unlock, &rb_mutex);  // warten auf Signal mit p1_unlock -> wieder starten von consumer
-                pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
+                pthread_mutex_lock(&rc_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
+                pthread_cond_wait(&c_unlock, &rc_mutex);  // warten auf Signal mit p1_unlock -> wieder starten von consumer
+                pthread_mutex_unlock(&rc_mutex); // Freigabe der Ressourcen
         }
         pthread_mutex_lock(&rb_mutex);  // Reservierung der Ressourcen für den aktuellen Thread
-        if(p_rb->count > 0) { // Wenn counter <= 0 -> Ringpuffer ist leer -> es kann nichts mehr gelesen werden,
+        while (p_rb-> count <= 0) { //Solange count <=0 -> ist nichts mehr zum Lesen im Puffer -> wait for signal not_empty
+            pthread_cond_wait(&not_empty_condvar, &rb_mutex);
+        }
+
+        //Fall er aus der While-Schleife raus ist-> er hat ein signal zum Aufwachen bekommen, darf also weiter arbeiten
             pthread_testcancel(); // sicheres Cancel
             zeichen = *p_rb ->p_out; // nächstes Zeichen, das gelesen kann, holen
             if (zaehler < MAXZEICHEN) {  // Max erreicht
@@ -272,11 +283,9 @@ void* consumer(void *pid)
             else
                 p_rb ->p_out++; // Zeigt auf das nächste Platz im Ringpuffer, was gelesen kann
             p_rb -> count--;
-            //pthread_cond_signal(&not_full_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
-        }
+            pthread_cond_signal(&not_full_condvar); // Signal für consumer, das er starten werden kann, falls er gestoppt ist
         pthread_mutex_unlock(&rb_mutex); // Freigabe der Ressourcen
         sleep(2); // um ein anderen Thread ran zu lassen
-        //else pthread_cond_wait(&not_empty_condvar, &rb_mutex);
     }
     return((void *) &cterminated);
 }
